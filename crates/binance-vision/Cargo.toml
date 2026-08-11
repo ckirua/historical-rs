@@ -1,0 +1,52 @@
+[package]
+name = "binance-vision"
+description = "Rust library for Binance Vision historical market data"
+readme = "../../README.md"
+keywords = ["binance", "crypto", "market-data"]
+categories = ["api-bindings", "finance"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["export", "mirror"]
+export = ["dep:arrow", "dep:parquet"]
+mirror = ["export", "dep:indicatif", "dep:tempfile", "historical-core/mirror"]
+s3 = ["mirror", "dep:rust-s3", "historical-core/s3"]
+cache = ["dep:sqlx"]
+clickhouse = ["s3", "export", "dep:clickhouse", "dep:bytes", "dep:arrow", "cache"]
+
+[dependencies]
+anyhow.workspace = true
+arrow = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+chrono.workspace = true
+clickhouse = { workspace = true, optional = true }
+csv.workspace = true
+directories.workspace = true
+flate2.workspace = true
+futures.workspace = true
+historical-core = { workspace = true, features = ["http"] }
+indicatif = { workspace = true, optional = true }
+parquet = { workspace = true, optional = true }
+reqwest.workspace = true
+rust-s3 = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx = { workspace = true, optional = true }
+thiserror.workspace = true
+tempfile = { workspace = true, optional = true }
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+wiremock.workspace = true

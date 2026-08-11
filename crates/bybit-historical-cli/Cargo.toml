@@ -1,0 +1,21 @@
+[package]
+name = "bybit-historical-cli"
+description = "CLI for mirroring Bybit historical Spot order books"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "bybit-historical"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+bybit-historical = { path = "../bybit-historical" }
+historical-core = { workspace = true }
+chrono.workspace = true
+clap.workspace = true
+tokio.workspace = true

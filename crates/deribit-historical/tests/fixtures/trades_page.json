@@ -1,0 +1,33 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "trades": [
+      {
+        "trade_seq": 1,
+        "trade_id": "8541285",
+        "timestamp": 1534242862267,
+        "tick_direction": 1,
+        "price": 6035.0,
+        "mark_price": 6041.76,
+        "instrument_name": "BTC-PERPETUAL",
+        "index_price": 6034.91,
+        "direction": "buy",
+        "amount": 10.0
+      },
+      {
+        "trade_seq": 2,
+        "trade_id": "8541368",
+        "timestamp": 1534243101608,
+        "tick_direction": 0,
+        "price": 6043.0,
+        "mark_price": 6037.83,
+        "instrument_name": "BTC-PERPETUAL",
+        "index_price": 6037.37,
+        "direction": "buy",
+        "amount": 10.0,
+        "contracts": 1.0
+      }
+    ],
+    "has_more": true
+  }
+}

@@ -1,0 +1,24 @@
+[package]
+name = "okx-historical-cli"
+description = "CLI for OKX historical market data CDN archives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "okx-historical"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+okx-historical = { path = "../okx-historical", features = ["s3", "cache"] }
+chrono.workspace = true
+clap.workspace = true
+futures.workspace = true
+historical-core = { workspace = true }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

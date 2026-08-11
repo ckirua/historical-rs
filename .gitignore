@@ -1,0 +1,43 @@
+# Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Secrets (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# Runtime / smoke logs
+/logs/
+*.log
+*.log.*
+
+# Local mirror / download artifacts (defaults live under ~/.data)
+/data/
+*.parquet
+*.parquet.zstd
+manifest.jsonl
+*.segments/
+
+# Python (scripts/bybit)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+.env.venv/
+
+# Editors / IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+.cursor/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini

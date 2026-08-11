@@ -1,0 +1,21 @@
+[package]
+name = "deribit-historical-cli"
+description = "CLI for mirroring Deribit historical public trades to S3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "deribit-historical"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+deribit-historical = { path = "../deribit-historical" }
+historical-core = { workspace = true }
+tokio.workspace = true
