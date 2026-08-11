@@ -119,4 +119,4 @@ Exchange ops notes under `docs/{binance,kraken,okx,bybit,deribit}/` target a **f
 
 ## License
 
-MIT — Arathi Research.
+MIT — ckirua.

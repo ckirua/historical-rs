@@ -38,7 +38,7 @@ impl InstrumentsCache {
     }
 
     pub fn default_path() -> PathBuf {
-        directories::ProjectDirs::from("com", "arathi", "deribit-historical")
+        directories::ProjectDirs::from("com", "ckirua", "deribit-historical")
             .map(|dirs| dirs.cache_dir().join("instruments.json"))
             .unwrap_or_else(|| PathBuf::from(".deribit-instruments-cache.json"))
     }

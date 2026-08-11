@@ -25,8 +25,8 @@ default-members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["Arathi Research"]
-repository = "https://github.com/arathi-mercat/historical-rs"
+authors = ["ckirua"]
+repository = "https://github.com/ckirua/historical-rs"
 rust-version = "1.88"
 
 [workspace.dependencies]
