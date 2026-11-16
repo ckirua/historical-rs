@@ -3,6 +3,7 @@
 use s3::bucket::Bucket;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -384,12 +385,18 @@ async fn put_manifest(bucket: &Bucket, key: &str, body: &[u8]) -> Result<()> {
     .await
 }
 
+/// Whether an HTTP status looks like a transient S3 / gateway failure.
+pub fn is_transient_s3_status(code: u16) -> bool {
+    matches!(code, 500 | 502 | 503 | 504)
+}
+
 /// Whether an S3 error string looks like a transient gateway / transport failure.
-fn is_transient_s3_message(message: &str) -> bool {
+pub fn is_transient_s3_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("504")
         || lower.contains("503")
         || lower.contains("502")
+        || lower.contains("500")
         || lower.contains("timeout")
         || lower.contains("timed out")
         || lower.contains("eof")
@@ -404,6 +411,80 @@ fn is_transient_s3_error(err: &Error) -> bool {
         Error::S3(message) => is_transient_s3_message(message),
         _ => false,
     }
+}
+
+/// Outcome of a resume-time object existence check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeHead {
+    /// Object is present (HTTP 2xx).
+    Exists,
+    /// Object is absent (HTTP 404 / Not Found).
+    Missing,
+    /// HEAD kept failing with transient gateway/transport errors after retries.
+    ///
+    /// Callers must **not** treat this as missing: re-downloading and re-uploading
+    /// during an S3 outage amplifies load and produces large false `failed` counts.
+    Unavailable(String),
+}
+
+/// HEAD an object for `--resume`, retrying transient 5xx / transport failures.
+///
+/// On exhausted transient failures returns [`ResumeHead::Unavailable`] so the
+/// mirror can mark the entry failed and retry on a later run instead of
+/// hammering CDN + S3 uploads.
+pub async fn head_object_for_resume(bucket: &Bucket, key: &str) -> ResumeHead {
+    match with_s3_retries("HEAD", key, || async {
+        match bucket.head_object(key).await {
+            Ok((_, code)) if (200..300).contains(&code) => Ok(ResumeHead::Exists),
+            Ok((_, 404)) => Ok(ResumeHead::Missing),
+            Ok((_, code)) if is_transient_s3_status(code) => {
+                Err(Error::S3(format!("HEAD returned HTTP {code}")))
+            }
+            Ok((_, code)) => {
+                warn!(%key, code, "unexpected HEAD response during resume check");
+                Ok(ResumeHead::Missing)
+            }
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("404") || message.contains("Not Found") {
+                    Ok(ResumeHead::Missing)
+                } else if is_transient_s3_message(&message) {
+                    Err(Error::S3(message))
+                } else {
+                    warn!(%key, %message, "HEAD failed during resume check");
+                    Ok(ResumeHead::Missing)
+                }
+            }
+        }
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(err) => ResumeHead::Unavailable(err.to_string()),
+    }
+}
+
+/// Stream a local file to S3 with the same transient retry policy as manifest ops.
+pub async fn put_file_object_with_retries(
+    bucket: &Bucket,
+    key: &str,
+    path: &Path,
+    content_type: &str,
+) -> Result<()> {
+    with_s3_retries("PUT", key, || async {
+        let mut input = tokio::fs::File::open(path).await?;
+        let response = bucket
+            .put_object_stream_with_content_type(&mut input, key, content_type)
+            .await
+            .map_err(|error| Error::S3(error.to_string()))?;
+        let code = response.status_code();
+        if (200..300).contains(&code) {
+            Ok(())
+        } else {
+            Err(Error::S3(format!("S3 upload failed with HTTP {code}")))
+        }
+    })
+    .await
 }
 
 async fn with_s3_retries<T, F, Fut>(op: &str, key: &str, mut attempt_fn: F) -> Result<T>
@@ -492,10 +573,17 @@ mod tests {
 
     #[test]
     fn classifies_hetzner_gateway_and_transport_failures_as_transient() {
+        assert!(is_transient_s3_status(500));
+        assert!(is_transient_s3_status(502));
+        assert!(is_transient_s3_status(503));
+        assert!(is_transient_s3_status(504));
+        assert!(!is_transient_s3_status(404));
+        assert!(!is_transient_s3_status(403));
         assert!(is_transient_s3_message("manifest GET returned HTTP 504"));
         assert!(is_transient_s3_message("error decoding response body: unexpected EOF"));
         assert!(is_transient_s3_message("GET key timed out after 3 attempts (30s each)"));
         assert!(is_transient_s3_message("connection reset by peer"));
+        assert!(is_transient_s3_message("HEAD returned HTTP 503"));
         assert!(is_transient_s3_error(&Error::S3(
             "manifest PUT returned HTTP 503".into()
         )));

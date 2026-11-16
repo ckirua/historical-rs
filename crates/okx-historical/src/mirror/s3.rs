@@ -14,8 +14,8 @@ use crate::model::{MirrorStatus, OkxFile};
 use super::convert::{download_and_convert_file, is_not_found};
 use super::local::{iter_files, MirrorOptions};
 use super::manifest::{entry_from_file, ManifestEntry};
-use super::s3_manifest::{new_s3_manifest_writer, S3_MANIFEST_KEY};
-use historical_core::{spawn_progress_reporter, MirrorProgress};
+use super::s3_manifest::new_s3_manifest_writer;
+use historical_core::{spawn_progress_reporter, MirrorProgress, ResumeHead};
 
 #[derive(Clone)]
 pub struct S3Config(historical_core::S3Config);
@@ -48,46 +48,33 @@ impl S3Config {
     }
 }
 
-async fn load_resume_keys(s3: &S3Config) -> Option<Arc<HashSet<String>>> {
-    let (manifest_result, objects_result) = tokio::join!(
-        historical_core::s3_manifest::load_manifest_index(s3.core(), S3_MANIFEST_KEY),
-        historical_core::s3_manifest::list_s3_object_keys(s3.core(), "historical/data/"),
+/// Build the resume skip set from objects already under this dataset prefix.
+///
+/// Listing existing parquet keys is the source of truth for S3 resume. The root
+/// JSONL manifest is intentionally not required: loading it (plus every segment)
+/// regularly times out on Hetzner and previously forced a per-object HEAD storm.
+async fn load_resume_keys(s3: &S3Config, options: &MirrorOptions) -> Option<Arc<HashSet<String>>> {
+    let data_prefix = format!(
+        "historical/data/{}/{}/{}/",
+        options.market.path_segment(),
+        options.frequency.as_str(),
+        options.data_type.path_segment(),
     );
-
-    let manifest_index = match manifest_result {
-        Ok(index) => index,
-        Err(err) => {
-            warn!(%err, "failed to load S3 manifest resume index; falling back to HEAD checks");
-            return None;
+    info!(%data_prefix, "loading S3 resume keys from data prefix");
+    match historical_core::s3_manifest::list_s3_object_keys(s3.core(), &data_prefix).await {
+        Ok(keys) => {
+            info!(resume_keys = keys.len(), "S3 resume key set ready");
+            Some(Arc::new(keys.into_iter().collect()))
         }
-    };
-    let object_keys = match objects_result {
-        Ok(keys) => keys,
         Err(err) => {
-            warn!(%err, "failed to list S3 data keys for resume; falling back to HEAD checks");
-            return None;
-        }
-    };
-
-    let mut keys: HashSet<String> = object_keys.into_iter().collect();
-    for indexed_entry in manifest_index.successful() {
-        let entry: ManifestEntry = match serde_json::from_slice(&indexed_entry.serialized) {
-            Ok(entry) => entry,
-            Err(err) => {
-                warn!(%err, "failed to parse S3 manifest resume entry; falling back to HEAD checks");
-                return None;
-            }
-        };
-        let successful =
-            entry.status == "ok" || (entry.status == "skipped" && entry.error.is_none());
-        if successful {
-            if let Some(path) = entry.path {
-                keys.insert(path);
-            }
+            warn!(
+                %err,
+                %data_prefix,
+                "failed to list S3 data keys for resume; falling back to HEAD checks"
+            );
+            None
         }
     }
-
-    Some(Arc::new(keys))
 }
 
 pub async fn run_s3_mirror(
@@ -100,7 +87,7 @@ pub async fn run_s3_mirror(
     let http = http.clone();
     let resume = options.resume;
     let resume_keys = if resume {
-        load_resume_keys(s3).await
+        load_resume_keys(s3, &options).await
     } else {
         None
     };
@@ -192,49 +179,33 @@ async fn upload_file(
     };
 
     if resume && resume_keys.is_none() {
-        match bucket.head_object(&key).await {
-            Ok((_, code)) if (200..300).contains(&code) => {
+        match historical_core::head_object_for_resume(&bucket, &key).await {
+            ResumeHead::Exists => {
                 entry.status = "skipped".into();
                 return entry;
             }
-            Ok((_, 404)) => {}
-            Ok((_, code)) => {
-                warn!(%key, code, "unexpected HEAD response during resume check");
-            }
-            Err(err) => {
-                let message = err.to_string();
-                if !message.contains("404") && !message.contains("Not Found") {
-                    warn!(%key, %message, "HEAD failed during resume check");
-                }
+            ResumeHead::Missing => {}
+            ResumeHead::Unavailable(message) => {
+                entry.status = "failed".into();
+                entry.error = Some(format!("resume HEAD unavailable: {message}"));
+                return entry;
             }
         }
     }
 
     match download_and_convert_file(http, file).await {
         Ok((parquet, rows)) => {
-            let upload = async {
-                let mut input = tokio::fs::File::open(parquet.path()).await?;
-                bucket
-                    .put_object_stream_with_content_type(
-                        &mut input,
-                        &key,
-                        "application/vnd.apache.parquet",
-                    )
-                    .await
-                    .map_err(|error| crate::error::Error::S3(error.to_string()))
-            }
-            .await;
-            match upload {
-                Ok(response) if (200..300).contains(&response.status_code()) => {
+            match historical_core::put_file_object_with_retries(
+                &bucket,
+                &key,
+                parquet.path(),
+                "application/vnd.apache.parquet",
+            )
+            .await
+            {
+                Ok(()) => {
                     entry.status = "ok".into();
                     entry.rows = Some(rows);
-                }
-                Ok(response) => {
-                    entry.status = "failed".into();
-                    entry.error = Some(format!(
-                        "S3 upload failed with HTTP {}",
-                        response.status_code()
-                    ));
                 }
                 Err(err) => {
                     entry.status = "failed".into();

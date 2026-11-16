@@ -34,4 +34,7 @@ pub use progress::{spawn_progress_reporter, MirrorProgress};
 pub use s3::S3Config;
 
 #[cfg(feature = "s3")]
-pub use s3_manifest::S3ManifestWriter;
+pub use s3_manifest::{
+    head_object_for_resume, is_transient_s3_message, is_transient_s3_status,
+    put_file_object_with_retries, ResumeHead, S3ManifestWriter,
+};
